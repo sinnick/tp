@@ -1,0 +1,18 @@
+# Credentials - NEVER commit
+.env
+*.env
+config.json5
+
+# Saved threads (user data)
+threads/*.md
+
+# Node
+node_modules/
+package-lock.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
