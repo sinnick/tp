@@ -160,6 +160,14 @@
             font-size: 0.85rem;
         }
         
+        .thread-item-cover {
+            width: 100%;
+            height: 140px;
+            object-fit: cover;
+            border-radius: 6px;
+            margin-bottom: 0.8rem;
+        }
+        
         /* Reader view */
         .reader {
             display: none;
@@ -469,8 +477,9 @@
             empty.style.display = 'none';
             list.innerHTML = threads.map((t, i) => `
                 <li class="thread-item" onclick="showReader(${i})">
+                    ${t.cover_image ? `<img src="${t.cover_image}" class="thread-item-cover" alt="Cover">` : ''}
                     <div class="thread-item-header">
-                        <h3>Thread by ${t.author || 'Unknown'}</h3>
+                        <h3>${t.title || `Thread by ${t.author || 'Unknown'}`}</h3>
                         <button class="delete-btn" onclick="deleteThread('${t.filename}', event)">🗑️</button>
                     </div>
                     <div class="meta">

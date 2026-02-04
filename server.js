@@ -73,14 +73,14 @@ const server = http.createServer((req, res) => {
 
                 const tweetId = match[1];
                 
-                // Run bird to fetch - first try single read to detect article
+                // Run bird to fetch with full JSON for article parsing
                 const env = {
                     ...process.env,
                     AUTH_TOKEN: process.env.AUTH_TOKEN,
                     CT0: process.env.CT0
                 };
 
-                const singleResult = execSync(`bird read ${tweetId} --json`, { 
+                const singleResult = execSync(`bird read ${tweetId} --json-full`, { 
                     env,
                     encoding: 'utf-8',
                     timeout: 30000
@@ -95,10 +95,17 @@ const server = http.createServer((req, res) => {
 
                 const isArticle = !!singleTweet.article;
                 let tweets;
+                let articleData = null;
+                let coverImage = null;
                 
                 if (isArticle) {
-                    // For articles, just use the single tweet
+                    // For articles, parse the full article content with images
                     tweets = [singleTweet];
+                    const rawArticle = singleTweet._raw?.article?.article_results?.result;
+                    if (rawArticle) {
+                        articleData = parseArticleContent(rawArticle);
+                        coverImage = rawArticle.cover_media?.media_info?.original_img_url;
+                    }
                 } else {
                     // For threads, fetch the full thread
                     const threadResult = execSync(`bird thread ${tweetId} --json`, { 
@@ -131,14 +138,20 @@ tweet_id: "${tweetId}"
 url: "https://x.com/${author}/status/${tweetId}"
 type: "${isArticle ? 'article' : 'thread'}"
 ${articleTitle ? `title: "${articleTitle.replace(/"/g, '\\"')}"` : ''}
+${coverImage ? `cover_image: "${coverImage}"` : ''}
 saved_at: "${new Date().toISOString()}"
 ---
 
 `;
                 if (isArticle && articleTitle) {
                     md += `# ${articleTitle}\n\n`;
-                    md += `*${authorName}* · [${dateStr}](https://x.com/${author}/status/${tweetId})\n\n---\n\n`;
-                    md += `${tweets[0].text || ''}\n`;
+                    md += `*${authorName}* · [${dateStr}](https://x.com/${author}/status/${tweetId})\n\n`;
+                    if (coverImage) {
+                        md += `![Cover](${coverImage})\n\n`;
+                    }
+                    md += `---\n\n`;
+                    // Use parsed article content with images, or fall back to plain text
+                    md += articleData ? articleData : (tweets[0].text || '') + '\n';
                 } else {
                     md += `# Thread by @${author}\n\n`;
                     md += `*${authorName}* · [${dateStr}](https://x.com/${author}/status/${tweetId})\n\n---\n\n`;
@@ -206,6 +219,104 @@ function parseFrontmatter(content) {
     });
     
     return { meta, content: match[2] };
+}
+
+// Parse Twitter Article content_state to markdown with images
+function parseArticleContent(article) {
+    if (!article.content_state) return null;
+    
+    const { blocks, entityMap } = article.content_state;
+    if (!blocks) return null;
+    
+    // Build media ID to URL map
+    const mediaMap = {};
+    if (article.media_entities) {
+        for (const media of article.media_entities) {
+            if (media.media_id && media.media_info?.original_img_url) {
+                mediaMap[media.media_id] = media.media_info.original_img_url;
+            }
+        }
+    }
+    
+    // Build entity key to media URL map
+    const entityMediaMap = {};
+    if (entityMap) {
+        for (const entity of entityMap) {
+            if (entity.value?.type === 'MEDIA' && entity.value?.data?.mediaItems) {
+                const mediaId = entity.value.data.mediaItems[0]?.mediaId;
+                if (mediaId && mediaMap[mediaId]) {
+                    entityMediaMap[entity.key] = mediaMap[mediaId];
+                }
+            }
+        }
+    }
+    
+    let md = '';
+    
+    for (const block of blocks) {
+        const text = block.text || '';
+        
+        switch (block.type) {
+            case 'header-one':
+                md += `# ${text}\n\n`;
+                break;
+            case 'header-two':
+                md += `## ${text}\n\n`;
+                break;
+            case 'header-three':
+                md += `### ${text}\n\n`;
+                break;
+            case 'blockquote':
+                md += `> ${text}\n\n`;
+                break;
+            case 'unordered-list-item':
+                md += `- ${text}\n`;
+                break;
+            case 'ordered-list-item':
+                md += `1. ${text}\n`;
+                break;
+            case 'atomic':
+                // This is usually an image - find the entity
+                if (block.entityRanges && block.entityRanges.length > 0) {
+                    const entityKey = block.entityRanges[0].key.toString();
+                    const imageUrl = entityMediaMap[entityKey];
+                    if (imageUrl) {
+                        md += `\n![](${imageUrl})\n\n`;
+                    }
+                }
+                break;
+            case 'unstyled':
+            default:
+                if (text.trim()) {
+                    // Apply inline styles
+                    let styledText = text;
+                    if (block.inlineStyleRanges) {
+                        // Sort by offset descending to apply from end to start
+                        const styles = [...block.inlineStyleRanges].sort((a, b) => b.offset - a.offset);
+                        for (const style of styles) {
+                            const start = style.offset;
+                            const end = style.offset + style.length;
+                            const segment = styledText.substring(start, end);
+                            let styled = segment;
+                            
+                            if (style.style === 'BOLD') {
+                                styled = `**${segment}**`;
+                            } else if (style.style === 'ITALIC' || style.style === 'Italic') {
+                                styled = `*${segment}*`;
+                            }
+                            
+                            styledText = styledText.substring(0, start) + styled + styledText.substring(end);
+                        }
+                    }
+                    md += `${styledText}\n\n`;
+                } else {
+                    md += '\n';
+                }
+                break;
+        }
+    }
+    
+    return md;
 }
 
 server.listen(PORT, () => {
