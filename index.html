@@ -46,36 +46,77 @@
             transition: all 0.3s ease;
         }
         
-        .container {
-            max-width: 680px;
-            margin: 0 auto;
-            padding: 2rem 1.5rem;
+        .sticky-header {
+            position: sticky;
+            top: 0;
+            background: var(--bg);
+            z-index: 100;
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid var(--border);
+            backdrop-filter: blur(10px);
         }
         
-        header {
+        .header-inner {
+            max-width: 680px;
+            margin: 0 auto;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 2rem;
-            padding-bottom: 1rem;
-            border-bottom: 1px solid var(--border);
+            gap: 1rem;
         }
         
-        h1 {
-            font-size: 1.5rem;
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .back-btn {
+            background: none;
+            border: none;
+            color: var(--accent);
+            cursor: pointer;
+            padding: 0.4rem;
+            font-size: 1.2rem;
+            display: none;
+            flex-shrink: 0;
+        }
+        
+        .back-btn:hover {
+            opacity: 0.7;
+        }
+        
+        .back-btn.visible {
+            display: block;
+        }
+        
+        .header-title {
+            font-size: 1.2rem;
             margin: 0;
             font-weight: normal;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .container {
+            max-width: 680px;
+            margin: 0 auto;
+            padding: 1.5rem;
         }
         
         .controls {
             display: flex;
-            gap: 0.5rem;
+            gap: 0.3rem;
+            flex-shrink: 0;
         }
         
         .theme-btn {
             background: var(--card-bg);
             border: 1px solid var(--border);
-            padding: 0.4rem 0.8rem;
+            padding: 0.4rem 0.6rem;
             border-radius: 4px;
             cursor: pointer;
             font-size: 0.85rem;
@@ -126,24 +167,6 @@
         
         .reader.active {
             display: block;
-        }
-        
-        .reader-header {
-            margin-bottom: 2rem;
-        }
-        
-        .back-btn {
-            background: none;
-            border: none;
-            color: var(--accent);
-            cursor: pointer;
-            padding: 0;
-            font-size: 1rem;
-            margin-bottom: 1rem;
-        }
-        
-        .back-btn:hover {
-            text-decoration: underline;
         }
         
         .reader-content {
@@ -302,16 +325,21 @@
     </style>
 </head>
 <body data-theme="light">
-    <div class="container">
-        <header>
-            <h1>🧵 Thread Pocket</h1>
+    <header class="sticky-header">
+        <div class="header-inner">
+            <div class="header-left">
+                <button class="back-btn" id="back-btn" onclick="showList()">←</button>
+                <h1 class="header-title" id="header-title">🧵 Thread Pocket</h1>
+            </div>
             <div class="controls">
                 <button class="theme-btn" onclick="setTheme('light')">☀️</button>
                 <button class="theme-btn" onclick="setTheme('sepia')">📜</button>
                 <button class="theme-btn" onclick="setTheme('dark')">🌙</button>
             </div>
-        </header>
-        
+        </div>
+    </header>
+
+    <div class="container">
         <main id="list-view">
             <div class="save-form">
                 <input type="text" id="url-input" placeholder="Paste Twitter/X thread URL..." class="url-input">
@@ -331,9 +359,6 @@
         </main>
         
         <div class="reader" id="reader-view">
-            <div class="reader-header">
-                <button class="back-btn" onclick="showList()">← Back to list</button>
-            </div>
             <div class="reader-content" id="reader-content">
                 <!-- Thread content here -->
             </div>
@@ -462,12 +487,27 @@
             document.getElementById('list-view').style.display = 'none';
             document.getElementById('reader-view').classList.add('active');
             document.getElementById('reader-content').innerHTML = marked.parse(thread.content);
+            
+            // Update header
+            document.getElementById('back-btn').classList.add('visible');
+            const title = thread.title || `Thread by ${thread.author || 'Unknown'}`;
+            document.getElementById('header-title').textContent = title;
+            
+            // Scroll to top
+            window.scrollTo(0, 0);
         }
         
         // Show list view
         function showList() {
             document.getElementById('list-view').style.display = 'block';
             document.getElementById('reader-view').classList.remove('active');
+            
+            // Reset header
+            document.getElementById('back-btn').classList.remove('visible');
+            document.getElementById('header-title').textContent = '🧵 Thread Pocket';
+            
+            // Scroll to top
+            window.scrollTo(0, 0);
         }
         
         // Enter key to save
