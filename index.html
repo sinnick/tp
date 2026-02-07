@@ -3,6 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#1a8cd8">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧵</text></svg>">
     <title>Thread Pocket 🧵</title>
     <style>
         :root {
@@ -346,6 +351,25 @@
             align-items: flex-start;
         }
         
+        /* Offline indicator */
+        .offline-banner {
+            display: none;
+            background: #f39c12;
+            color: white;
+            text-align: center;
+            padding: 0.5rem;
+            font-size: 0.85rem;
+        }
+        
+        body.offline .offline-banner {
+            display: block;
+        }
+        
+        body.offline .save-form {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+        
         /* Mobile adjustments */
         @media (max-width: 600px) {
             .reader-content h1 {
@@ -372,6 +396,7 @@
     </style>
 </head>
 <body data-theme="light">
+    <div class="offline-banner">📴 Offline mode - Reading from cache</div>
     <header class="sticky-header">
         <div class="header-inner">
             <div class="header-left">
@@ -415,7 +440,27 @@
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script>
         const API_BASE = '/tp/api';
+        const CACHE_KEY = 'thread-pocket-threads';
         let threads = [];
+        let isOffline = !navigator.onLine;
+        
+        // Register Service Worker
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js')
+                .then(reg => console.log('[SW] Registered'))
+                .catch(err => console.error('[SW] Registration failed:', err));
+        }
+        
+        // Offline detection
+        window.addEventListener('online', () => {
+            isOffline = false;
+            document.body.classList.remove('offline');
+            loadThreads(); // Refresh from server
+        });
+        window.addEventListener('offline', () => {
+            isOffline = true;
+            document.body.classList.add('offline');
+        });
         
         // Theme management
         function setTheme(theme) {
@@ -476,14 +521,23 @@
             }
         }
         
-        // Load threads from API
+        // Load threads from API (with offline fallback)
         async function loadThreads() {
             try {
                 const res = await fetch(API_BASE + '/threads');
                 threads = await res.json();
+                // Cache in localStorage for offline use
+                localStorage.setItem(CACHE_KEY, JSON.stringify(threads));
                 renderList();
             } catch (err) {
                 console.error('Failed to load threads:', err);
+                // Try loading from localStorage cache
+                const cached = localStorage.getItem(CACHE_KEY);
+                if (cached) {
+                    threads = JSON.parse(cached);
+                    renderList();
+                    console.log('[Offline] Loaded from cache');
+                }
             }
         }
         
@@ -564,6 +618,9 @@
         });
         
         // Initial load
+        if (!navigator.onLine) {
+            document.body.classList.add('offline');
+        }
         loadThreads();
     </script>
 </body>
