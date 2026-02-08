@@ -1,8 +1,9 @@
 // Thread Pocket Service Worker - Offline First
-const CACHE_NAME = 'thread-pocket-v1';
+const CACHE_NAME = 'thread-pocket-v2';
 const APP_SHELL = [
   '/tp/',
   '/tp/index.html',
+  '/tp/share.html',
   '/tp/manifest.json'
 ];
 
