@@ -132,7 +132,69 @@
         .theme-btn:hover {
             border-color: var(--accent);
         }
+
+        /* Sync status bar */
+        .sync-bar {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 0.8rem 1rem;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 0.9rem;
+        }
         
+        .sync-status {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .sync-icon {
+            font-size: 1.1rem;
+        }
+        
+        .sync-icon.syncing {
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        
+        .sync-text {
+            color: var(--text-muted);
+        }
+        
+        .last-sync {
+            color: var(--text-muted);
+            font-size: 0.8rem;
+        }
+
+        /* Offline banner */
+        .offline-banner {
+            background: linear-gradient(135deg, #f39c12, #e67e22);
+            color: white;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            text-align: center;
+        }
+        
+        .offline-banner h3 {
+            margin: 0 0 0.3rem;
+            font-size: 1rem;
+        }
+        
+        .offline-banner p {
+            margin: 0;
+            font-size: 0.85rem;
+            opacity: 0.9;
+        }
+
         .thread-list {
             list-style: none;
             padding: 0;
@@ -209,7 +271,6 @@
         }
         
         .reader-content img:first-of-type {
-            /* Cover image - slightly smaller */
             max-height: 300px;
             object-fit: cover;
             width: 100%;
@@ -253,7 +314,7 @@
         .save-form {
             display: flex;
             gap: 0.5rem;
-            margin-bottom: 1.5rem;
+            margin-bottom: 1rem;
         }
         
         .url-input {
@@ -350,24 +411,12 @@
             justify-content: space-between;
             align-items: flex-start;
         }
-        
-        /* Offline indicator */
-        .offline-banner {
-            display: none;
-            background: #f39c12;
-            color: white;
-            text-align: center;
-            padding: 0.5rem;
+
+        /* Article count badge */
+        .article-count {
             font-size: 0.85rem;
-        }
-        
-        body.offline .offline-banner {
-            display: block;
-        }
-        
-        body.offline .save-form {
-            opacity: 0.5;
-            pointer-events: none;
+            color: var(--text-muted);
+            margin-top: 0.5rem;
         }
         
         /* Mobile adjustments */
@@ -392,11 +441,16 @@
             .container {
                 padding: 1rem;
             }
+            
+            .sync-bar {
+                flex-direction: column;
+                gap: 0.5rem;
+                align-items: flex-start;
+            }
         }
     </style>
 </head>
 <body data-theme="light">
-    <div class="offline-banner">📴 Offline mode - Reading from cache</div>
     <header class="sticky-header">
         <div class="header-inner">
             <div class="header-left">
@@ -413,20 +467,39 @@
 
     <div class="container">
         <main id="list-view">
-            <div class="save-form">
-                <input type="text" id="url-input" placeholder="Paste Twitter/X thread URL..." class="url-input">
-                <button class="save-btn" onclick="saveThread()">Save Thread</button>
+            <!-- Offline banner (hidden when online) -->
+            <div class="offline-banner" id="offline-banner" style="display: none;">
+                <h3>📴 Modo lectura</h3>
+                <p>Conectate a internet para agregar artículos</p>
             </div>
+
+            <!-- Online: sync bar + form -->
+            <div id="online-controls">
+                <div class="sync-bar" id="sync-bar">
+                    <div class="sync-status">
+                        <span class="sync-icon" id="sync-icon">✓</span>
+                        <span class="sync-text" id="sync-text">Sincronizado</span>
+                    </div>
+                    <span class="last-sync" id="last-sync"></span>
+                </div>
+                
+                <div class="save-form">
+                    <input type="text" id="url-input" placeholder="Pegar URL de Twitter/X..." class="url-input">
+                    <button class="save-btn" onclick="saveThread()">Guardar</button>
+                </div>
+            </div>
+            
             <div id="status-msg" class="status-msg"></div>
+            
+            <div class="article-count" id="article-count"></div>
             
             <ul class="thread-list" id="thread-list">
                 <!-- Threads will be listed here -->
             </ul>
             
-            <div class="empty-state" id="empty-state">
-                <p>No threads saved yet.</p>
-                <p>Use <code>./save-thread.sh &lt;url&gt;</code> to save threads</p>
-                <p>Then drop the .md files here to read them.</p>
+            <div class="empty-state" id="empty-state" style="display: none;">
+                <p>No hay artículos guardados.</p>
+                <p>Pegá una URL de Twitter/X para empezar.</p>
             </div>
         </main>
         
@@ -441,6 +514,7 @@
     <script>
         const API_BASE = '/tp/api';
         const CACHE_KEY = 'thread-pocket-threads';
+        const SYNC_KEY = 'thread-pocket-last-sync';
         let threads = [];
         let isOffline = !navigator.onLine;
         
@@ -454,13 +528,28 @@
         // Offline detection
         window.addEventListener('online', () => {
             isOffline = false;
-            document.body.classList.remove('offline');
-            loadThreads(); // Refresh from server
+            updateOfflineUI();
+            syncThreads();
         });
+        
         window.addEventListener('offline', () => {
             isOffline = true;
-            document.body.classList.add('offline');
+            updateOfflineUI();
         });
+        
+        // Update UI based on online/offline status
+        function updateOfflineUI() {
+            const offlineBanner = document.getElementById('offline-banner');
+            const onlineControls = document.getElementById('online-controls');
+            
+            if (isOffline) {
+                offlineBanner.style.display = 'block';
+                onlineControls.style.display = 'none';
+            } else {
+                offlineBanner.style.display = 'none';
+                onlineControls.style.display = 'block';
+            }
+        }
         
         // Theme management
         function setTheme(theme) {
@@ -472,6 +561,66 @@
         const savedTheme = localStorage.getItem('thread-pocket-theme') || 'light';
         setTheme(savedTheme);
         
+        // Sync status UI
+        function setSyncStatus(status) {
+            const icon = document.getElementById('sync-icon');
+            const text = document.getElementById('sync-text');
+            const lastSync = document.getElementById('last-sync');
+            
+            switch(status) {
+                case 'syncing':
+                    icon.textContent = '🔄';
+                    icon.classList.add('syncing');
+                    text.textContent = 'Sincronizando...';
+                    break;
+                case 'success':
+                    icon.textContent = '✓';
+                    icon.classList.remove('syncing');
+                    text.textContent = 'Sincronizado';
+                    // Save sync timestamp
+                    const now = Date.now();
+                    localStorage.setItem(SYNC_KEY, now);
+                    updateLastSyncDisplay();
+                    break;
+                case 'error':
+                    icon.textContent = '⚠️';
+                    icon.classList.remove('syncing');
+                    text.textContent = 'Error al sincronizar';
+                    break;
+                case 'cached':
+                    icon.textContent = '📦';
+                    icon.classList.remove('syncing');
+                    text.textContent = 'Desde caché';
+                    break;
+            }
+        }
+        
+        function updateLastSyncDisplay() {
+            const lastSyncEl = document.getElementById('last-sync');
+            const lastSyncTime = localStorage.getItem(SYNC_KEY);
+            
+            if (lastSyncTime) {
+                const date = new Date(parseInt(lastSyncTime));
+                const now = new Date();
+                const diffMs = now - date;
+                const diffMins = Math.floor(diffMs / 60000);
+                const diffHours = Math.floor(diffMs / 3600000);
+                
+                let timeAgo;
+                if (diffMins < 1) {
+                    timeAgo = 'ahora';
+                } else if (diffMins < 60) {
+                    timeAgo = `hace ${diffMins}m`;
+                } else if (diffHours < 24) {
+                    timeAgo = `hace ${diffHours}h`;
+                } else {
+                    timeAgo = date.toLocaleDateString();
+                }
+                
+                lastSyncEl.textContent = timeAgo;
+            }
+        }
+        
         // Status message
         function showStatus(msg, type) {
             const el = document.getElementById('status-msg');
@@ -482,20 +631,70 @@
             }
         }
         
+        // Sync threads from server
+        async function syncThreads() {
+            if (isOffline) {
+                loadFromCache();
+                return;
+            }
+            
+            setSyncStatus('syncing');
+            
+            try {
+                const res = await fetch(API_BASE + '/threads');
+                if (!res.ok) throw new Error('Server error');
+                
+                threads = await res.json();
+                
+                // Cache everything (including full content)
+                localStorage.setItem(CACHE_KEY, JSON.stringify(threads));
+                
+                setSyncStatus('success');
+                renderList();
+                
+                console.log(`[Sync] Cached ${threads.length} articles with full content`);
+            } catch (err) {
+                console.error('Sync failed:', err);
+                setSyncStatus('error');
+                
+                // Fall back to cache
+                loadFromCache();
+            }
+        }
+        
+        // Load from cache (offline mode)
+        function loadFromCache() {
+            const cached = localStorage.getItem(CACHE_KEY);
+            if (cached) {
+                threads = JSON.parse(cached);
+                renderList();
+                if (!isOffline) {
+                    setSyncStatus('cached');
+                }
+                console.log(`[Cache] Loaded ${threads.length} articles`);
+            }
+            updateLastSyncDisplay();
+        }
+        
         // Save thread from URL
         async function saveThread() {
+            if (isOffline) {
+                showStatus('Necesitás conexión para guardar', 'error');
+                return;
+            }
+            
             const input = document.getElementById('url-input');
             const btn = document.querySelector('.save-btn');
             const url = input.value.trim();
             
             if (!url) {
-                showStatus('Please paste a Twitter/X URL', 'error');
+                showStatus('Pegá una URL de Twitter/X', 'error');
                 return;
             }
             
             btn.disabled = true;
-            btn.textContent = 'Saving...';
-            showStatus('Fetching thread...', 'loading');
+            btn.textContent = 'Guardando...';
+            showStatus('Obteniendo thread...', 'loading');
             
             try {
                 const res = await fetch(API_BASE + '/save', {
@@ -507,52 +706,38 @@
                 const data = await res.json();
                 
                 if (!res.ok) {
-                    throw new Error(data.error || 'Failed to save');
+                    throw new Error(data.error || 'Error al guardar');
                 }
                 
-                showStatus(`✅ Saved ${data.tweetCount} tweets from @${data.author}`, 'success');
+                showStatus(`✅ Guardado: ${data.tweetCount} tweets de @${data.author}`, 'success');
                 input.value = '';
-                loadThreads();
+                
+                // Re-sync to get the new article
+                syncThreads();
             } catch (err) {
                 showStatus('❌ ' + err.message, 'error');
             } finally {
                 btn.disabled = false;
-                btn.textContent = 'Save Thread';
-            }
-        }
-        
-        // Load threads from API (with offline fallback)
-        async function loadThreads() {
-            try {
-                const res = await fetch(API_BASE + '/threads');
-                threads = await res.json();
-                // Cache in localStorage for offline use
-                localStorage.setItem(CACHE_KEY, JSON.stringify(threads));
-                renderList();
-            } catch (err) {
-                console.error('Failed to load threads:', err);
-                // Try loading from localStorage cache
-                const cached = localStorage.getItem(CACHE_KEY);
-                if (cached) {
-                    threads = JSON.parse(cached);
-                    renderList();
-                    console.log('[Offline] Loaded from cache');
-                }
+                btn.textContent = 'Guardar';
             }
         }
         
         // Delete thread
         async function deleteThread(filename, e) {
             e.stopPropagation();
-            if (!confirm('Delete this thread?')) return;
+            if (isOffline) {
+                showStatus('Necesitás conexión para eliminar', 'error');
+                return;
+            }
+            if (!confirm('¿Eliminar este artículo?')) return;
             
             try {
                 await fetch(API_BASE + '/threads/' + encodeURIComponent(filename), {
                     method: 'DELETE'
                 });
-                loadThreads();
+                syncThreads();
             } catch (err) {
-                showStatus('❌ Failed to delete', 'error');
+                showStatus('❌ Error al eliminar', 'error');
             }
         }
         
@@ -560,42 +745,58 @@
         function renderList() {
             const list = document.getElementById('thread-list');
             const empty = document.getElementById('empty-state');
+            const countEl = document.getElementById('article-count');
             
             if (threads.length === 0) {
                 list.innerHTML = '';
                 empty.style.display = 'block';
+                countEl.textContent = '';
                 return;
             }
             
             empty.style.display = 'none';
+            countEl.textContent = `${threads.length} artículo${threads.length !== 1 ? 's' : ''} guardado${threads.length !== 1 ? 's' : ''}`;
+            
             list.innerHTML = threads.map((t, i) => `
                 <li class="thread-item" onclick="showReader(${i})">
-                    ${t.cover_image ? `<img src="${t.cover_image}" class="thread-item-cover" alt="Cover">` : ''}
+                    ${t.cover_image ? `<img src="${t.cover_image}" class="thread-item-cover" alt="Cover" loading="lazy">` : ''}
                     <div class="thread-item-header">
-                        <h3>${t.title || `Thread by ${t.author || 'Unknown'}`}</h3>
-                        <button class="delete-btn" onclick="deleteThread('${t.filename}', event)">🗑️</button>
+                        <h3>${escapeHtml(t.title || `Thread de ${t.author || 'Unknown'}`)}</h3>
+                        ${!isOffline ? `<button class="delete-btn" onclick="deleteThread('${t.filename}', event)">🗑️</button>` : ''}
                     </div>
                     <div class="meta">
-                        ${t.author_name || ''} · 
-                        ${t.saved_at ? new Date(t.saved_at).toLocaleDateString() : 'Unknown date'}
+                        ${escapeHtml(t.author_name || '')} · 
+                        ${t.saved_at ? new Date(t.saved_at).toLocaleDateString() : 'Sin fecha'}
                     </div>
                 </li>
             `).join('');
         }
         
+        // Escape HTML to prevent XSS
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
         // Show reader view
         function showReader(index) {
             const thread = threads[index];
+            if (!thread || !thread.content) {
+                showStatus('Contenido no disponible', 'error');
+                return;
+            }
+            
             document.getElementById('list-view').style.display = 'none';
             document.getElementById('reader-view').classList.add('active');
             document.getElementById('reader-content').innerHTML = marked.parse(thread.content);
             
             // Update header
             document.getElementById('back-btn').classList.add('visible');
-            const title = thread.title || `Thread by ${thread.author || 'Unknown'}`;
+            const title = thread.title || `Thread de ${thread.author || 'Unknown'}`;
             document.getElementById('header-title').textContent = title;
             
-            // Scroll to top
             window.scrollTo(0, 0);
         }
         
@@ -604,11 +805,9 @@
             document.getElementById('list-view').style.display = 'block';
             document.getElementById('reader-view').classList.remove('active');
             
-            // Reset header
             document.getElementById('back-btn').classList.remove('visible');
             document.getElementById('header-title').textContent = '🧵 Thread Pocket';
             
-            // Scroll to top
             window.scrollTo(0, 0);
         }
         
@@ -618,10 +817,14 @@
         });
         
         // Initial load
-        if (!navigator.onLine) {
-            document.body.classList.add('offline');
+        updateOfflineUI();
+        updateLastSyncDisplay();
+        
+        if (isOffline) {
+            loadFromCache();
+        } else {
+            syncThreads();
         }
-        loadThreads();
     </script>
 </body>
 </html>

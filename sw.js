@@ -1,5 +1,5 @@
-// Thread Pocket Service Worker - Offline First
-const CACHE_NAME = 'thread-pocket-v2';
+// Thread Pocket Service Worker - Sync-First
+const CACHE_NAME = 'thread-pocket-v3';
 const APP_SHELL = [
   '/tp/',
   '/tp/index.html',
@@ -30,16 +30,15 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Fetch: network-first for API, cache-first for static
+// Fetch handler
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   
-  // API calls: network-first, cache response for offline
-  if (url.pathname === '/tp/threads' || url.pathname === '/threads') {
+  // API /threads: network-first, cache response
+  if (url.pathname === '/tp/api/threads' || url.pathname === '/tp/threads') {
     event.respondWith(
       fetch(event.request)
         .then((response) => {
-          // Clone and cache the response
           const cloned = response.clone();
           caches.open(CACHE_NAME).then((cache) => {
             cache.put(event.request, cloned);
@@ -47,27 +46,39 @@ self.addEventListener('fetch', (event) => {
           return response;
         })
         .catch(() => {
-          // Offline: return cached version
           return caches.match(event.request);
         })
     );
     return;
   }
   
-  // Static files: cache-first
+  // External images (Twitter/pbs.twimg.com): cache for offline reading
+  if (url.hostname.includes('twimg.com') || url.hostname.includes('twitter.com')) {
+    event.respondWith(
+      caches.match(event.request).then((cached) => {
+        if (cached) return cached;
+        
+        return fetch(event.request).then((response) => {
+          if (response.ok) {
+            const cloned = response.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(event.request, cloned);
+            });
+          }
+          return response;
+        }).catch(() => {
+          // Return placeholder or nothing for failed images
+          return new Response('', { status: 404 });
+        });
+      })
+    );
+    return;
+  }
+  
+  // Static files: cache-first with background update
   event.respondWith(
     caches.match(event.request).then((cached) => {
-      if (cached) {
-        // Return cache, but also update in background
-        fetch(event.request).then((response) => {
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, response);
-          });
-        }).catch(() => {});
-        return cached;
-      }
-      // Not in cache: fetch and cache
-      return fetch(event.request).then((response) => {
+      const fetchPromise = fetch(event.request).then((response) => {
         if (response.ok) {
           const cloned = response.clone();
           caches.open(CACHE_NAME).then((cache) => {
@@ -75,7 +86,16 @@ self.addEventListener('fetch', (event) => {
           });
         }
         return response;
-      });
+      }).catch(() => cached);
+      
+      return cached || fetchPromise;
     })
   );
+});
+
+// Listen for skip waiting message
+self.addEventListener('message', (event) => {
+  if (event.data === 'skipWaiting') {
+    self.skipWaiting();
+  }
 });
